@@ -1,0 +1,12 @@
+web1:
+  name: my-app
+  php_version: 5.3.5
+  document_root: public
+  shared_writable_dirs:
+    - backups
+  php_extensions:
+    - mysql
+    - curl
+  cron:
+    - 0 0 * * *  scripts/mysql_dump.sh
+    - 10 0 * * *  php scripts/s3.php backup-bucket backups/db_backup
