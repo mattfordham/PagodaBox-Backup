@@ -8,5 +8,5 @@ web1:
     - mysql
     - curl
   cron:
-    - 0 0 * * *  scripts/mysql_dump.sh
-    - 10 0 * * *  php scripts/s3.php backup-bucket backups/db_backup
+    - "0 0 * * *":  "scripts/mysql_dump.sh"
+    - "10 0 * * *":  "php scripts/s3.php backup-bucket backups/db_backup"
