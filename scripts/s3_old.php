@@ -1,17 +1,16 @@
 <?php
 
 //Email recipient to send status email to after sync.
-define("MAIL_TO_RECIP", "ENTEREMAIL");
+// define("MAIL_TO_RECIP", "matt@revolvercreative.com");
 
-date_default_timezone_set('America/Los_Angeles');
-require_once('aws/aws-autoloader.php');
+require_once('s3sdk/sdk.class.php');
 
 class S3sync
 {
     private $_s3;
     private $_startTime;
     private $_bucketName = '';
-    private $_directory = 'mysql-ee';
+    private $_directory = '';
     private $_fileList = array();
     private $_fileHashList = array();
     private $_userBuckets = array();
@@ -22,26 +21,16 @@ class S3sync
     private $_errorMessages = array();
     private $isDryRun = FALSE;
     const MAX_FILE_SIZE_IN_BYTES = 4294967296;
-    const S3KEY = '';
-    const S3SECRET = ''
 
     public function __construct($bucketName, $directory, $dryRun = FALSE)
     {
-      $this->_s3 = new Aws\S3\S3Client([
-        'version' => 'latest',
-        'region' => 'us-east-1',
-        'credentials' => [
-            'key' => self::S3KEY,
-            'secret' => self::S3SECRET
-          ]
-        ]);
-
-        //$this->_s3->disable_ssl_verification(false);
+        $this->_s3 = new AmazonS3();
+        $this->_s3->disable_ssl_verification(false);
         $this->_startTime = microtime(true);
         $this->_bucketName = $bucketName;
         $this->_directory = $directory;
         $this->isDryRun = $dryRun;
-
+        
         if( empty($bucketName) || empty($directory) )
             throw new Exception('Missing bucket or directory');
         else
@@ -73,7 +62,7 @@ class S3sync
         foreach($this->_fileList as $fileHash => $fileMeta)
         {
             if( ! isset($this->_s3Objects[$fileHash]) )
-            {
+            {   
                 $this->uploadFile($fileMeta);
             }
             else
@@ -84,23 +73,22 @@ class S3sync
         }
     }
 
-
+    
     public function uploadFile($fileMeta)
     {
         echo ".";
 
         $fullPath = $fileMeta['path'];
         $fileHash = $fileMeta['hash'];
-
+        
         echo $fileMeta['path'] . "\n";
-
+        
         if( $this->_filesUploaded % 100 == 0  && $this->_filesUploaded != 0)
             echo "({$this->_filesUploaded} / " . count($this->_fileList) . ") \n";
 
         $options = array(
-            'Bucket' => $this->_bucketName,
-            'Key' => $fullPath,
-            'SourceFile' => $fullPath,
+            'fileUpload' => $fullPath,
+            'storage' => AmazonS3::STORAGE_REDUCED,
             'meta' => array(
                 'path' => $fullPath,
                 'hash' => $fileHash
@@ -109,9 +97,12 @@ class S3sync
 
         if(!$this->isDryRun)
         {
-            $response = $this->_s3->putObject($options);
+            $response = $this->_s3->create_object($this->_bucketName, $fileHash, $options);
 
-            $this->_filesUploaded++;
+            if( $response->isOK() )
+                $this->_filesUploaded++;
+            else
+                $this->_uploadErrors++;
         }
         else
             $this->_filesUploaded++;
@@ -161,12 +152,11 @@ class S3sync
 
     public function loadObjectsFromS3Bucket()
     {
-        $response = $this->_s3->getIterator('ListObjects', array('Bucket' => $this->_bucketName));
+        $response = $this->_s3->get_object_list($this->_bucketName);
         $results = array();
 
-        foreach($response as $object)
+        foreach($response as $fileName)
         {
-            $fileName = $object['Key'];
             $results[$fileName] = $fileName;
         }
 
@@ -176,11 +166,17 @@ class S3sync
     public function loadUsersBuckets()
     {
         $results = array();
-        $response = $this->_s3->listBuckets();
+        $response = $this->_s3->list_buckets();
 
-        foreach($response['Buckets'] as $bucket)
+        // Success?
+        if(! $response->isOK() )
+            throw new Exception("Unable to retrieve users buckets");
+
+        $buckets = $response->body->Buckets->Bucket;
+
+        foreach($buckets as $bucket)
         {
-            $tmpName = (string) $bucket['Name'];
+            $tmpName = (string) $bucket->Name;
             $results[$tmpName] = $tmpName;
         }
 
@@ -199,7 +195,7 @@ class S3sync
 
         if($d === FALSE)
             return FALSE;
-
+        
         while (false !== ($entry = $d->read()))
         {
             // skip hidden files
